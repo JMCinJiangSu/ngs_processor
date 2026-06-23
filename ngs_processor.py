@@ -1,5 +1,5 @@
 """
-NGS下机数据自动化处理脚本
+OncoPro下机数据自动化处理脚本
 功能：质控检查、SNVIndel过滤统计、生成报告Excel
 """
 
@@ -48,7 +48,7 @@ LEFT   = Alignment(horizontal="left",   vertical="center")
 QC_RULES = {
     "CleanQ30":           (">=", 0.75,  ""),
     "Depth_CDS":          (">=", 400.0, ""),
-    "RNA-Control":        (">=", 20.0,  ""),
+    "RNA-Control":        (">=", 10.0,  ""),
     "Coverage(50x)_SNP":  (">=", 0.90,  ""),
 }
 
@@ -62,8 +62,10 @@ QC_REPORT_COLS = [
 SNV_REVIEW_COLS = [
     "Sample", "Chr", "Start", "End", "Ref", "Alt",
     "Tags", "Depth", "Freq", "AltDepth",
-    "Gene", "Type", "CDSChange", "Amplicon", "Plus", "Minus",
+    "Gene", "Type", "CDSChange", "Amplicon", "Plus", "Minus", "Significance"
 ]
+
+Fusion_COLS = ["Sample", "Fusion", "Copies", "Tags", "5'Chr", "5'BreakPoint", "3'Chr", "3'BreakPoint"]
 
 PASSTHROUGH_SHEETS = ["HD_pass", "Fusion"]   # AmpliconStat handled separately as pivot
 
@@ -167,6 +169,12 @@ def check_qc(summary_df: pd.DataFrame):
 # ─────────────────────────────────────────────
 # SNVIndel 处理
 # ─────────────────────────────────────────────
+def normalize_cds(raw: str) -> str:
+    return str(raw).strip()
+
+def cds_key(df: pd.DataFrame) -> pd.Series:
+    return df["CDSChange"].astype(str).map(normalize_cds)
+
 def process_snvindel(snv_df: pd.DataFrame, discard_df: pd.DataFrame, fake_pos_df: pd.DataFrame | None) -> pd.DataFrame:
     """
     1. 过滤 Tags 含 Black_list / Polymorphism
@@ -181,19 +189,14 @@ def process_snvindel(snv_df: pd.DataFrame, discard_df: pd.DataFrame, fake_pos_df
         )
         snv_df = snv_df[~mask].copy()
 
-    # 构建唯一识别键
-    def make_key(df):
-        gene = df["Gene"].astype(str).str.strip() if "Gene" in df.columns else pd.Series([""] * len(df))
-        cds  = df["CDSChange"].astype(str).str.strip() if "CDSChange" in df.columns else pd.Series([""] * len(df))
-        return gene + "|" + cds
+    
 
-    snv_df["_key"] = make_key(snv_df)
+    snv_df["_key"] = cds_key(snv_df)
 
     # 2a. DisCard 出现次数（Gene+CDSChange）
     discard_count = {}
     if discard_df is not None and not discard_df.empty:
-        discard_df["_key"] = make_key(discard_df)
-        discard_count = discard_df["_key"].value_counts().to_dict()
+        discard_count = cds_key(discard_df).value_counts().to_dict()
     snv_df["DisCard_Count"] = snv_df["_key"].map(lambda k: discard_count.get(k, 0))
 
     # 2b. SNVIndel 内 CDSChange 出现次数（全表，Gene+CDSChange键）
@@ -203,8 +206,7 @@ def process_snvindel(snv_df: pd.DataFrame, discard_df: pd.DataFrame, fake_pos_df
     # 2c. 是否在假阳文件中
     fake_keys = set()
     if fake_pos_df is not None and not fake_pos_df.empty:
-        fake_pos_df["_key"] = make_key(fake_pos_df)
-        fake_keys = set(fake_pos_df["_key"])
+        fake_keys = set(cds_key(fake_pos_df))
     snv_df["IsFakePositive"] = snv_df["_key"].map(lambda k: "是" if k in fake_keys else "否")
 
     # 3. AltDepth 标记
@@ -262,7 +264,7 @@ def write_qc_report(wb, qc_df, fail_dict, summary_df):
     thresholds = {
         "CleanQ30":          0.75,
         "Depth_CDS":         400.0,
-        "RNA-Control":       20.0,
+        "RNA-Control":       10.0,
         "Coverage(50x)_SNP": 0.90,
     }
     nrows = len(qc_df) + 1
