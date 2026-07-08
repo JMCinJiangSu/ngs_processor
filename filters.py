@@ -91,9 +91,9 @@ def check_qc(summary_df: pd.DataFrame, cfg: ProductConfig):
 
             if status == QC_FAIL:
                 ref = risk_val if risk_val is not None else pass_val
-                fails.append(f"{col}={val}(不合格，标准≥{ref})")
+                fails.append(f"{col}={val}(不合格，质控标准≥{ref})")
             elif status == QC_RISK:
-                fails_msg = f"{col}={val}(风险，建议≥{pass_val})"
+                fails_msg = f"{col}={val}(风险，风险标准≥{pass_val})"
                 risks.append(fails_msg)
 
         if fails:
@@ -148,6 +148,9 @@ def process_snvindel(
         pattern = "|".join(cfg.tag_filters)
         mask = snv_df["Tags"].astype(str).str.contains(pattern, case=False, na=False)
         snv_df = snv_df[~mask].copy()
+    
+    if cfg.file_keyword == "ADXHS-gHC":
+        snv_df = flag_review(snv_df, cfg)
 
     return _add_stats(snv_df, discard_df, fake_pos_df, cfg)
 
@@ -216,17 +219,36 @@ def process_discard_rescue(
     cfg: ProductConfig,
 ) -> pd.DataFrame:
     """
-    从 SNVIndelDiscard 中二次筛选需要关注的变异（三条件 AND）：
-      1. Significance 列值在 cfg.significance_rescue_values 中（4 或 5）
-      2. Freq >= cfg.freq_rescue_min（0.005）
-      3. Tags 含 cfg.rescue_tag_keywords 中任一关键词
-         OR Gene 在 cfg.rescue_genes 中
+    从 SNVIndelDiscard 中二次筛选出需要人工复核的行（三条件 AND）：
+    1. Tags/Tag含cfg.rescue_tag_keywords的3、4、5类变异
+    2. 指定基因列表中的4、5类变异
     """
     if discard_df is None or discard_df.empty:
         return pd.DataFrame()
 
     df = discard_df.copy()
+   
+    #tags = df["Tag"].astype(str) if "Tag" in df.columns else pd.Series([""] * len(df), index=df.index)
+    if "Tag" in df.columns or "Tags" in df.columns:
+        tags = df["Tag"].astype(str) if "Tag" in df.columns else df["Tags"].astype(str)
+    else:
+        tags = pd.Series([""] * len(df), index=df.index)
+    sig = df["Significance"].astype(str).str.strip() if "Significance" in df.columns else pd.Series([""] * len(df), index=df.index)
+    gene = df["Gene"].astype(str).str.strip() if "Gene" in df.columns else pd.Series([""] * len(df), index=df.index)
+    freq = df["Freq"].apply(
+        lambda x: to_num(x) is not None and to_num(x) >= cfg.freq_rescue_min
+    )
 
+    if cfg.discard_tag_exclude:
+        exclude_pattern = "|".join(cfg.discard_tag_exclude)
+        excluded = tags.str.contains(exclude_pattern, case=False, na=False)
+        df, tags, sig, gene = df[~excluded], tags[~excluded], sig[~excluded], gene[~excluded]
+    
+    has_hotspot = tags.str.contains("|".join(cfg.rescue_tag_keywords), case=False, na=False)
+    branch_a = has_hotspot & sig.isin(cfg.significance_rescue_values) & freq
+    branch_b = (~has_hotspot) & gene.isin(cfg.rescue_genes) & sig.isin(cfg.discard_rescue_sig_gene) & freq
+    return df[branch_a | branch_b].copy()
+'''
     # 条件1：Significance
     sig_vals = [str(v) for v in cfg.significance_rescue_values]
     if "Significance" in df.columns:
@@ -255,7 +277,7 @@ def process_discard_rescue(
     cond3 = tag_cond | gene_cond
 
     rescued = df[cond1 & cond2 & cond3].copy()
-    return rescued
+'''
 
 def process_germnonic(
         germnonic_df: pd.DataFrame,
@@ -348,6 +370,7 @@ def flag_hd_pass(hd_df: pd.DataFrame, summary_df: pd.DataFrame) -> pd.DataFrame:
 def flag_cnv(cnv_df: pd.DataFrame) -> pd.DataFrame:
     """
     在CNV表里插入CNV_Flag列
+    适用于Master
     逻辑按照：
     CopyNum>=10 AND Auto = F
     """
@@ -359,13 +382,39 @@ def flag_cnv(cnv_df: pd.DataFrame) -> pd.DataFrame:
 
     flags = []
     for _, row in cnv_df.iterrows():
-        copynum = to_num(row.get("CopyNum"))
-        auto = row.get("Auto")
+        if "CopyNum" in cnv_df.columns:
+            copynum = to_num(row.get("CopyNum"))
+            auto = row.get("Auto")
 
-        if copynum >= 10 and auto == "F":
-            flags.append("Yes")
-        else:
-            flags.append("No")
-    cnv_df["CNV_Flag"] = flags
+            if copynum >= 10 and auto == "F":
+                flags.append("Yes")
+            else:
+                flags.append("No")
+    cnv_df["CNV_Flag"] = flags if flags else ""
 
     return cnv_df
+
+def flag_review(snv_df: pd.DataFrame, cfg: ProductConfig) -> pd.DataFrame:
+    """
+    标记需要复核的行：
+      分支A: Tags 含 Polymer/STR  且 Freq < review_freq_threshold_polymer_str
+      分支B: Tags 不含 Polymer/STR 且 Freq < review_freq_threshold_other
+             且 Significance 属于 review_significance_values
+    命中任一分支 → Review_Flag = "Yes"
+    """
+    snv_df = snv_df.copy()
+    tags = snv_df["Tags"].astype(str)
+    freq = snv_df["Freq"].apply(to_num)
+    sig  = snv_df["Significance"].astype(str).str.strip()
+
+    has_keyword = tags.str.contains(
+        "|".join(cfg.review_tag_keywords), case=False, na=False
+    )
+
+    branch_a = has_keyword & (freq < cfg.review_freq_threshold_polymer_str)
+    branch_b = (~has_keyword) \
+               & (freq < cfg.review_freq_threshold_other) \
+               & sig.isin(cfg.review_significance_values)
+
+    snv_df["Review_Flag"] = (branch_a | branch_b).map(lambda x: "Yes" if x else "")
+    return snv_df

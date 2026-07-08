@@ -3,6 +3,8 @@ Excel 报告写出模块
 所有 write_* 函数通过参数接收数据和配置，不引用全局状态。
 """
 
+from http import server
+
 import pandas as pd
 import openpyxl
 from openpyxl.styles import PatternFill, Font, Alignment, Border, Side
@@ -11,6 +13,7 @@ from openpyxl.utils import get_column_letter
 
 from config import ProductConfig
 from filters import to_num
+import os
 
 # ─────────────────────────────────────────────
 # 样式常量
@@ -31,6 +34,36 @@ THIN_BORDER = Border(
 )
 CENTER = Alignment(horizontal="center", vertical="center")
 LEFT   = Alignment(horizontal="left",   vertical="center")
+
+server_dict = {
+    "HW2B4N2": "server-2-1", # 上海肺科
+    "1G27M74": "server-5-142", # 上海十院
+    "JW1DWF3": "server-4-84" # 华东医院
+}
+# =============================================
+# 样本bam文件路径
+def get_bam_path(ngs_path: str, summary_df: pd.DataFrame, cfg: ProductConfig) -> str:
+    """
+    根据服务器、批次、样本、文库、lane信息生成bam文件路径。
+    """
+    # 解析服务器和批次信息
+    batch = os.path.basename(ngs_path)[:-5]
+    df = summary_df.copy()
+    df["sample_id_full"] = df["Sample"] + "_" + df["Library"] + "_" + df["FlowCell_Lane"]
+
+    server_name = ""
+    for k, v in cfg.server_dict.items():
+        if k in ngs_path:
+            server_name = v
+            break
+    
+    bam_path_list = []
+    if server_name:
+        for full_id in df["sample_id_full"]:
+            bam_path = f"https://{server_name}.hsptrms.amoydx.com/share/analysis/{batch}/{full_id}/{full_id}.merge.ssbc.bam"
+            bam_path_list.append(bam_path)
+    
+    return bam_path_list
 
 
 # ─────────────────────────────────────────────
@@ -99,7 +132,7 @@ def write_qc_report(wb, qc_df: pd.DataFrame, fail_dict: dict,
             row_fill = None
 
         row_vals = [
-            _bytes_to_human(row.get(c, "")) if c == "CleanData" else row.get(c, "")
+            _bytes_to_human(row.get(c, "")) if c == "CleanData" or c == "cleanData" else row.get(c, "")
             for c in headers
         ]
         ws.append(row_vals)
@@ -116,9 +149,10 @@ def write_qc_report(wb, qc_df: pd.DataFrame, fail_dict: dict,
             continue
         cl  = get_column_letter(col_idx[col_name])
         rng = f"{cl}2:{cl}{nrows}"
+        op = rule[0]
         pass_val = rule[1]
 
-        if len(rule) >= 3:
+        if len(rule) >= 3 and op == ">=":
             # 双阈值：绿 / 黄 / 红
             risk_val = rule[2]
             ws.conditional_formatting.add(
@@ -129,6 +163,14 @@ def write_qc_report(wb, qc_df: pd.DataFrame, fail_dict: dict,
                     fill=YELLOW_FILL))
             ws.conditional_formatting.add(
                 rng, CellIsRule("lessThan", [str(risk_val)], fill=RED_FILL))
+        elif len(rule) >= 3 and op == "risk_between":
+            #MSIScore 风险提示
+            hi, lo = rule[1], rule[2]
+            ws.conditional_formatting.add(
+                rng, FormulaRule(
+                formula = [f"AND({cl}2>={lo},{cl}2<{hi})"],
+                fill=YELLOW_FILL)
+            )
         else:
             # 单阈值：绿 / 红
             ws.conditional_formatting.add(
@@ -191,7 +233,7 @@ def _write_snv_sheet(wb, sheet_name: str, df: pd.DataFrame,
         return
 
     ws = wb.create_sheet(sheet_name)
-    common_extra = ["DisCard_Count", "SNVIndel_Count", "IsFakePositive", "LowAltDepth_Flag"]
+    common_extra = ["DisCard_Count", "SNVIndel_Count", "IsFakePositive", "LowAltDepth_Flag", "Review_Flag"]
     all_extra    = common_extra + (extra_flags or [])
     avail_review = [c for c in review_cols if c in df.columns]
     avail_extra  = [c for c in all_extra if c in df.columns]
@@ -210,8 +252,9 @@ def _write_snv_sheet(wb, sheet_name: str, df: pd.DataFrame,
         low_freq  = str(row.get("LowFreq_Flag", ""))
         fake_pos  = str(row.get("IsFakePositive", ""))
         discard   = to_num(row.get("DisCard_Count", 0)) or 0
+        review_flag = str(row.get("Review_Flag", ""))
 
-        if low_flag:
+        if low_flag or review_flag:
             fill = ORANGE_FILL
         elif low_freq:
             fill = YELLOW_FILL
@@ -247,6 +290,14 @@ def _write_snv_sheet(wb, sheet_name: str, df: pd.DataFrame,
             f"{cl}2:{cl}{nrows}",
             CellIsRule("greaterThan", ["0"],
                        font=Font(bold=True, color="0070C0", name="Arial", size=10)),
+        )
+    # Review_Flag 条件格式
+    if "Review_Flag" in col_idx:
+        cl = get_column_letter(col_idx["Review_Flag"])
+        ws.conditional_formatting.add(
+            f"A2:{get_column_letter(ncols)}{nrows}",
+            FormulaRule(formula=[f'${cl}2="Yes"'],
+                        fill=ORANGE_FILL),
         )
 
     ws.freeze_panes = ws["A2"]

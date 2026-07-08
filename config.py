@@ -15,6 +15,13 @@ from dataclasses import dataclass, field
 #   val < 风险值 → 红（不合格）
 # ══════════════════════════════════════════════════════════════
 
+# 服务器映射表（用于生成bam文件路径）
+server_dict = {
+    "HW2B4N2": "server-2-1", # 上海肺科
+    "1G27M74": "server-5-142", # 上海十院
+    "JW1DWF3": "server-4-84" # 华东医院
+}
+
 @dataclass
 class ProductConfig:
     # ── 基本信息 ──────────────────────────────────────────────
@@ -41,6 +48,13 @@ class ProductConfig:
     # ── AltDepth 低深度阈值 ────────────────────────────────────
     low_altdepth_threshold: int = 30
 
+    # ── SNVIndel 复核标记规则 ─────────────────────────
+    review_freq_threshold_polymer_str: float = 0.3 # Tags含Polymer或STR
+    review_freq_threshold_other: float = 0.4        # Tags不含Polymer或STR
+    review_significance_values: list = field(default_factory=list)  # 复核标记的Significance值列表
+    review_tag_keywords: list = field(default_factory=list)
+
+
     # ── 直接透传原始数据的 sheet 列表 ─────────────────────────
     passthrough_sheets: list = field(default_factory=list)
 
@@ -57,10 +71,12 @@ class ProductConfig:
     # AND 条件：Significance in significance_rescue_values
     #           AND Freq >= freq_rescue_min
     #           AND (Tags 含 rescue_tag_keywords 中任一 OR Gene 在 rescue_genes 中)
-    significance_rescue_values: list = field(default_factory=lambda: [4, 5])
+    significance_rescue_values: list = field(default_factory=lambda: ["3", "4", "5"])
+    discard_rescue_sig_gene: list = field(default_factory=lambda: ["4", "5"])
     freq_rescue_min: float = 0.005
-    rescue_tag_keywords: list = field(default_factory=lambda: ["HotSpot"])
+    rescue_tag_keywords: list = field(default_factory=list)
     rescue_genes: list = field(default_factory=list)   # 指定基因列表
+    discard_tag_exclude: list = field(default_factory=list) # 排除含指定字段的行
     
     # SNVIndelGermNonIC 筛选规则
     # 
@@ -107,8 +123,22 @@ PRODUCTS: list[ProductConfig] = [
             "Sample", "Fusion", "Copies", "Tags",
             "5'Chr", "5'BreakPoint", "3'Chr", "3'BreakPoint",
         ],
+        discard_review_cols=[
+            "Sample", "Chr", "Start", "End", "Ref", "Alt",
+            "Tags", "Depth", "Freq", "AltDepth",
+            "Gene", "Type", "CDSChange", "Amplicon", "Plus", "Minus", "Significance",
+        ],
         tag_filters=["Black_list", "Polymorphism"],
         low_altdepth_threshold=30,
+        # Discard 捞回
+        significance_rescue_values=[4, 5],
+        freq_rescue_min=0.0001,
+        rescue_tag_keywords=["HotSpot"],
+        rescue_genes=[
+            "ALK", "BRAF", "EGFR", "ERBB2", "ROS1",
+            "KRAS", "MET", "NRAS", "PIK3CA", "RET"
+            # 根据实际需求补充
+        ],
         passthrough_sheets=["Fusion"],
         has_snvindel=True,
         has_snvindel_split=False,
@@ -143,6 +173,9 @@ PRODUCTS: list[ProductConfig] = [
         tag_filters=["Black_list", "Polymorphism"],
         low_altdepth_threshold=30,
         passthrough_sheets=["NEWFusion", "Fusion"],
+        significance_rescue_values=[4, 5],
+        freq_rescue_min=0.0001,
+        rescue_tag_keywords=["HotSpot"],
         has_snvindel=True,
         has_snvindel_split=False,
         has_amplicon=True,
@@ -202,7 +235,8 @@ PRODUCTS: list[ProductConfig] = [
             "Gene", "Type", "CDSChange", "Depth_US", "Freq_US", "Var_US", "Depth_SS", "Freq_SS", "Var_SS", "Depth_DS", "Freq_DS", "Var_DS"
         ],
         # Discard 二次筛选（三条件 AND）
-        significance_rescue_values=[4, 5],
+        significance_rescue_values=["3", "4", "5"],
+        discard_rescue_sig_gene=["4", "5"],
         freq_rescue_min=0.005,
         rescue_tag_keywords=["HotSpot"],
         rescue_genes=[
@@ -241,21 +275,180 @@ PRODUCTS: list[ProductConfig] = [
         has_snvindel_split=False,
         has_amplicon=False,
     ),
-
-    # ── 新增产品示例，取消注释并填写实际参数即可 ──────────────
-    # ProductConfig(
-    #     name="LungCancer",
-    #     file_keyword="ADXHS-Lung",
-    #     fake_pos_filename="Lung_db.xlsx",
-    #     qc_rules={
-    #         "CleanQ30":  (">=", 0.80),
-    #         "Depth_CDS": (">=", 500.0),
-    #     },
-    #     qc_report_cols=["Sample", "CleanData", "CleanQ30", "Depth_CDS"],
-    #     snv_review_cols=["Sample", "Chr", "Start", "End", "Gene", "CDSChange"],
-    #     passthrough_sheets=["CNV", "Fusion"],
-    #     has_amplicon=False,
-    # ),
+    # BPTM Plus 组织
+    ProductConfig(
+        name="BPTM Plus 组织",
+        file_keyword="ADXHS-tBPTMplus",
+        fake_pos_filename="",
+        qc_sheet_name="Summary",
+        cnv_sheet_name="",
+        hd_sheet_name="",
+        qc_rules={
+            "CleanQ30":          (">=", 0.75),
+            "Depth":         (">=", 300.0),
+            "MSINum":           ("risk_between", 0.24, 0.12)
+        },
+        qc_report_cols=[
+            "Sample", "CleanData", "CleanQ30", "Depth",
+            "MappingRate", "RawDepth", "Uniformity(20%)",
+            "MSI_Ratio", "MSI_Num", "MSI_State",
+        ],
+        snv_review_cols=[
+            "Sample", "Chr", "Start", "End", "Ref", "Alt",
+            "Tags", "Depth", "Freq", "AltDepth",
+            "Gene", "Type", "CDSChange", "Amplicon", "Plus", "Minus", "Significance",
+        ],
+        discard_review_cols=[
+            "Sample", "Chr", "Start", "End", "Ref", "Alt",
+            "Tags", "Depth", "Freq", "AltDepth",
+            "Gene", "Type", "CDSChange", "Amplicon", "Plus", "Minus", "Significance",
+        ],
+        tag_filters=["Black_list", "Polymorphism"],
+        low_altdepth_threshold=30,
+        # Discard 捞回
+        significance_rescue_values=[4, 5],
+        freq_rescue_min=0.0015,
+        rescue_tag_keywords=[],
+        discard_tag_exclude=["Bad", "Polymorphism", "OutOfReg"],
+        rescue_genes=[
+            "POLE", "BRCA1", "BRCA2", "MLH1", "MSH2",
+            "MSH6", "PMS2", "TP53"
+            # 根据实际需求补充
+        ],
+        passthrough_sheets=[],
+        has_snvindel=True,
+        has_snvindel_split=False,
+        has_amplicon=False,
+    ),
+    # 遗传150
+    ProductConfig(
+        name="遗传150",
+        file_keyword="ADXHS-gHC",
+        fake_pos_filename="gHC_db.xlsx",
+        qc_sheet_name="Summary",
+        cnv_sheet_name="CNV",
+        hd_sheet_name="",
+        qc_rules={
+            "CleanQ30":          (">=", 0.75),
+            "Coverage(20X)":         (">=", 0.99),
+        },
+        qc_report_cols=[
+            "Sample", "CleanData", "CleanQ30", "Coverage(20X)", "Depth",
+            "MappingRate", "RawDepth", "Uniformity(20%)"
+        ],
+        snv_review_cols=[
+            "Sample", "Chr", "Start", "End", "Ref", "Alt",
+            "Tags", "Depth", "Freq", "AltDepth",
+            "Gene", "Type", "CDSChange", "Amplicon", "Plus", "Minus", "Significance",
+        ],
+        discard_review_cols=[
+            "Sample", "Chr", "Start", "End", "Ref", "Alt",
+            "Tags", "Depth", "Freq", "AltDepth",
+            "Gene", "Type", "CDSChange", "Amplicon", "Plus", "Minus", "Significance",
+        ],
+        tag_filters=["Black_list", "Polymorphism"],
+        low_altdepth_threshold=30,
+        review_freq_threshold_polymer_str=0.3,
+        review_freq_threshold_other=0.4,
+        review_significance_values=[3, 4, 5],
+        review_tag_keywords=["Polymer", "STR"],
+        # Discard 捞回
+        significance_rescue_values=[4, 5],
+        freq_rescue_min=0.0015,
+        rescue_tag_keywords=[],
+        discard_tag_exclude=[],
+        rescue_genes=[],
+        passthrough_sheets=["Checklist"],
+        has_snvindel=True,
+        has_snvindel_split=False,
+        has_amplicon=False,
+    ),
+    # BRCA
+    ProductConfig(
+        name="tBRCA",
+        file_keyword="BRCA",
+        fake_pos_filename="BRCA_SNP.xlsx",
+        qc_sheet_name="Summary",
+        cnv_sheet_name="",
+        hd_sheet_name="",
+        qc_rules={
+            "CleanQ30":          (">=", 0.75),
+            "MappingRate":         (">=", 0.85),
+            "Coverage":         ("==", 1),
+            "Depth":         (">=", 300),
+            "MinDepth":         (">=", 50),
+        },
+        qc_report_cols=[
+            "Sample", "CleanData", "CleanQ30", "Coverage", "MinDepth", "Depth",
+            "MappingRate", "RawDepth", "Uniformity(20%)"
+        ],
+        snv_review_cols=[
+            "Sample", "Chr", "Start", "End", "Ref", "Alt",
+            "Tags", "Depth", "Freq", "AltDepth",
+            "Gene", "Type", "CDSChange", "Amplicon", "Plus", "Minus", "Significance",
+        ],
+        discard_review_cols=[
+            "Sample", "Chr", "Start", "End", "Ref", "Alt",
+            "Tags", "Depth", "Freq", "AltDepth",
+            "Gene", "Type", "CDSChange", "Amplicon", "Plus", "Minus", "Significance",
+        ],
+        tag_filters=["Black_list", "Polymorphism"],
+        low_altdepth_threshold=30,
+        review_freq_threshold_polymer_str=0.35,
+        review_tag_keywords=["Polymer", "STR"],
+        # Discard 捞回
+        significance_rescue_values=[4, 5],
+        freq_rescue_min=0.0015,
+        rescue_tag_keywords=[],
+        discard_tag_exclude=["Bad", "Polymorphism", "OutOfReg"],
+        rescue_genes=[],
+        passthrough_sheets=["SNVIndelDiscard"],
+        has_snvindel=True,
+        has_snvindel_split=False,
+        has_amplicon=False,
+    ),
+    # HRD
+    ProductConfig(
+        name="HRD",
+        file_keyword="ADXHS-tHRD",
+        fake_pos_filename="",
+        qc_sheet_name="Summary",
+        cnv_sheet_name="",
+        hd_sheet_name="HD",
+        qc_rules={
+            "CleanQ30":          (">=", 0.75),
+            "Coverage(180x)_BRCA":         (">=", 0.95),
+            "Coverage(180x)_CDS":         (">=", 0.95),
+            "BAFNoise":         ("<=", 0.05),
+            "DepthNoise":         ("<=", 0.35),
+        },
+        qc_report_cols=[
+            "Sample", "CleanData", "CleanQ30", "Coverage(180x)_BRCA", "Coverage(180x)_CDS", "BAFNoise", "DepthNoise",
+            "MappingRate", "GSS", "ContaRatio", "ContaStat"
+        ],
+        snv_review_cols=[
+            "Sample", "Chr", "Start", "End", "Ref", "Alt",
+            "Tags", "Depth", "Freq", "AltDepth",
+            "Gene", "Type", "CDSChange", "Amplicon", "Plus", "Minus", "Significance",
+        ],
+        discard_review_cols=[
+            "Sample", "Chr", "Start", "End", "Ref", "Alt",
+            "Tags", "Depth", "Freq", "AltDepth",
+            "Gene", "Type", "CDSChange", "Amplicon", "Plus", "Minus", "Significance",
+        ],
+        tag_filters=["Black_list", "Polymorphism"],
+        low_altdepth_threshold=30,
+        # Discard 捞回
+        significance_rescue_values=[4, 5],
+        freq_rescue_min=0.015,
+        rescue_tag_keywords=[],
+        discard_tag_exclude=["Bad", "Polymorphism", "OutOfReg"],
+        rescue_genes=[],
+        passthrough_sheets=["HD"],
+        has_snvindel=True,
+        has_snvindel_split=False,
+        has_amplicon=False,
+    ),
 ]
 
 def detect_product(filename: str) -> ProductConfig | None:

@@ -34,7 +34,7 @@ warnings.filterwarnings("ignore")
 # ─────────────────────────────────────────────
 def load_fake_pos(work_dir: str, cfg: ProductConfig) -> pd.DataFrame | None:
     candidates = glob.glob(
-        os.path.join(work_dir, "**", cfg.fake_pos_filename), recursive=True
+        os.path.join(work_dir, "fake_db", cfg.fake_pos_filename), recursive=True
     )
     if not candidates:
         print(f"  ⚠ 未找到假阳文件 {cfg.fake_pos_filename}，假阳性检查将跳过")
@@ -60,13 +60,14 @@ def process_file(ngs_path: str, fake_pos_df: pd.DataFrame | None, cfg: ProductCo
     print(f"{'='*60}")
 
     # ── 读取所有需要的 sheet ──────────────────────────────────
-    t_read = time.time()
+    
     def read_sheet(name):
         try:
             return pd.read_excel(ngs_path, sheet_name=name)
         except Exception:
             return pd.DataFrame()
 
+    t_read = time.time()
     summary_df  = read_sheet(cfg.qc_sheet_name) if cfg.qc_sheet_name else pd.DataFrame()
     cnv_df      = read_sheet(cfg.cnv_sheet_name) if cfg.cnv_sheet_name else pd.DataFrame()
     hd_df       = read_sheet(cfg.hd_sheet_name)  if cfg.hd_sheet_name else pd.DataFrame()
@@ -99,10 +100,10 @@ def process_file(ngs_path: str, fake_pos_df: pd.DataFrame | None, cfg: ProductCo
                     lambda x: to_num(x) if to_num(x) is not None else x
                 )
         qc_df, fail_dict, risk_dict = check_qc(summary_df, cfg)
-        pass_count = len(summary_df) - len(fail_dict)
-        print(f"  样本数: {len(summary_df)}  "
-              f"合格: {len(summary_df)-len(fail_dict)-len(risk_dict)}  "
-              f"风险: {len(risk_dict)}  不合格: {len(fail_dict)}")
+        #pass_count = len(summary_df) - len(fail_dict)
+        #print(f"  样本数: {len(summary_df)}  "
+        #      f"合格: {len(summary_df)-len(fail_dict)-len(risk_dict)}  "
+        #      f"风险: {len(risk_dict)}  不合格: {len(fail_dict)}")
 
     # ── SNVIndel 处理 ─────────────────────────────────────────
     if cfg.has_snvindel:
@@ -110,23 +111,27 @@ def process_file(ngs_path: str, fake_pos_df: pd.DataFrame | None, cfg: ProductCo
             print("  ⚠ 未找到 SNVIndel Sheet")
         else:
             snv_df = process_snvindel(snv_df, discard_df, fake_pos_df, cfg)
-            print(f"  SNVIndel 过滤后行数: {len(snv_df)}")
+            rescued_df = process_discard_rescue(discard_df, cfg)
+            print(f"  SNVIndel 过滤后行数: {len(snv_df)}"
+                  f"  Discard二次筛选行数: {len(rescued_df)}")
     
     if cfg.has_snvindel_split:
         if not hot_df.empty:
             hot_df = process_hot_somatic(hot_df, discard_df, fake_pos_df, cfg)
-            print(f"  HotSomatic 过滤后行数: {len(hot_df)}")
+            #print(f"  HotSomatic 过滤后行数: {len(hot_df)}")
         if not somatic_df.empty:
             somatic_df = process_somatic(somatic_df, discard_df, fake_pos_df, cfg)
-            print(f"  Somatic 过滤后行数: {len(somatic_df)}")
+            #print(f"  Somatic 过滤后行数: {len(somatic_df)}")
         rescued_df = process_discard_rescue(discard_df, cfg)
         germnoic_df = process_germnonic(germnoic_df, cfg)
-        print(f"  Discard 二次筛选行数: {len(rescued_df)}")
+        print(f"  Discard 二次筛选行数: {len(rescued_df)}"
+              f"  GermNonIC筛选行数： {len(germnoic_df)}"
+              )
 
     # ── 写出报告 ──────────────────────────────────────────────
     t_write = time.time()
     base    = os.path.splitext(os.path.basename(ngs_path))[0]
-    out_path = os.path.join(os.path.dirname(ngs_path), f"{base}_Report.xlsx")
+    out_path = os.path.join(os.path.dirname(os.path.dirname(ngs_path)), "result", f"{base}_Report.xlsx")
 
     out_wb = openpyxl.Workbook()
     out_wb.remove(out_wb.active)
@@ -137,6 +142,7 @@ def process_file(ngs_path: str, fake_pos_df: pd.DataFrame | None, cfg: ProductCo
 
     if cfg.has_snvindel and not snv_df.empty:
         write_snvindel_review(out_wb, snv_df, cfg)
+        write_discard_review(out_wb, rescued_df, cfg)
 
     if cfg.has_snvindel_split:
         write_hot_somatic_review(out_wb, hot_df, cfg)
@@ -152,12 +158,12 @@ def process_file(ngs_path: str, fake_pos_df: pd.DataFrame | None, cfg: ProductCo
         hd_df = flag_hd_pass(hd_df, summary_df)
         write_hd_pass(out_wb, hd_df)
         hd_yes = (hd_df["HD_Flag"] == "Yes").sum()
-        print(f"  HD_pass: 共 {len(hd_df)} 行，HD_Flag=Yes: {hd_yes} 行")
+        print(f"  HD_pass: 共 {hd_yes} 行需要复核")
 
     for sheet_name, df in passthrough_data.items():
         if not df.empty:
             write_passthrough(out_wb, sheet_name, df)
-            print(f"  已输出 Sheet: {sheet_name}")
+            #print(f"  已输出 Sheet: {sheet_name}")
 
     if cfg.has_amplicon:
         write_amplicon_pivot(out_wb, amplicon_df)
@@ -165,7 +171,7 @@ def process_file(ngs_path: str, fake_pos_df: pd.DataFrame | None, cfg: ProductCo
     out_wb.save(out_path)
     print(f"  写出耗时: {time.time() - t_write:.1f}s")
     print(f"  ✔ 报告已生成: {os.path.basename(out_path)}  （总耗时 {time.time()-t0:.1f}s）")
-
+'''
     if fail_dict or risk_dict:
         print("\n  【质控提示】")
         for sample, fails in fail_dict.items():
@@ -173,6 +179,7 @@ def process_file(ngs_path: str, fake_pos_df: pd.DataFrame | None, cfg: ProductCo
         for sample, risks in risk_dict.items():
             if sample not in fail_dict:
                 print(f"    [风险]   {sample} {', '.join(risks)}")
+'''
 
 
 # ─────────────────────────────────────────────
@@ -182,10 +189,10 @@ def main():
     work_dir = os.path.dirname(sys.executable) if getattr(sys, "frozen", False) else os.getcwd()
     print("NGS 下机数据自动化处理工具")
     print(f"工作目录: {work_dir}")
-    print(f"已注册产品: {[p.name for p in PRODUCTS]}")
+    print(f"已记录产品: {[p.name for p in PRODUCTS]}")
 
     # 查找所有匹配的下机数据文件
-    all_xlsx = glob.glob(os.path.join(work_dir, "**", "*.xlsx"), recursive=True)
+    all_xlsx = glob.glob(os.path.join(work_dir, "excel", "*.xlsx"), recursive=True)
     all_xlsx = [f for f in all_xlsx if "_Report" not in os.path.basename(f)]
 
     # 按产品分组
