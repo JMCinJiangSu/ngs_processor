@@ -58,6 +58,9 @@ class ProductConfig:
     # ── 直接透传原始数据的 sheet 列表 ─────────────────────────
     passthrough_sheets: list = field(default_factory=list)
 
+    # ── 服务器映射表（用于生成 bam 文件路径） ───────────────────
+    server_dict: dict = field(default_factory=lambda: server_dict.copy())
+
     # ── 功能开关 ───────────────────────────────────────────────
     has_snvindel: bool = True          # 标准 SNVIndel 单表模式
     has_snvindel_split: bool = False   # 新模式：HotSomatic + Somatic + Discard 三表
