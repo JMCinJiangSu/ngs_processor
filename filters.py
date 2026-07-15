@@ -289,7 +289,9 @@ def process_germnonic(
     df = germnonic_df.copy()
 
     # 条件1：Significance
-    sig_vals = [str(v) for v in cfg.significance_rescue_values]
+    #sig_vals = [str(v) for v in cfg.significance_rescue_values]
+    # 由于discard过滤逻辑变动，discard_rescue_sig_gene为["4", "5"], significance_rescue_values为["3", "4", "5"], 这里使用discard_rescue_sig_gene
+    sig_vals = [str(v) for v in cfg.discard_rescue_sig_gene]
     if "Significance" in df.columns:
         cond1 = df["Significance"].astype(str).str.strip().isin(sig_vals)
     else:

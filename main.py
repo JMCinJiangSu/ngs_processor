@@ -137,7 +137,7 @@ def process_file(ngs_path: str, fake_pos_df: pd.DataFrame | None, cfg: ProductCo
     out_wb.remove(out_wb.active)
 
     if not qc_df.empty:
-        write_qc_report(out_wb, qc_df, fail_dict, risk_dict, cfg)
+        write_qc_report(out_wb, qc_df, fail_dict, risk_dict, cfg, ngs_path, summary_df)
     write_qc_failitem(out_wb, fail_dict, risk_dict)
 
     if cfg.has_snvindel and not snv_df.empty:

@@ -19,7 +19,8 @@ from dataclasses import dataclass, field
 server_dict = {
     "HW2B4N2": "server-2-1", # 上海肺科
     "1G27M74": "server-5-142", # 上海十院
-    "JW1DWF3": "server-4-84" # 华东医院
+    "JW1DWF3": "server-4-84", # 华东医院
+    "FGN7X34": "server-5-121" # 复旦中山
 }
 
 @dataclass
@@ -31,6 +32,7 @@ class ProductConfig:
     qc_sheet_name: str          # QC 统计表名称（下机表格中）
     cnv_sheet_name: str         # CNV 检测结果表名称（下机表格中）
     hd_sheet_name: str          # HD检测结果表名称（下机表格中）
+    server_dict: dict = field(default_factory=lambda: server_dict.copy())  # 服务器映射表（用于生成bam文件路径）
 
    # ── QC 规则 ────────────────────────────────────────────────
     # 单阈值: {col: (">=", pass_val)}
@@ -367,7 +369,7 @@ PRODUCTS: list[ProductConfig] = [
     ProductConfig(
         name="tBRCA",
         file_keyword="BRCA",
-        fake_pos_filename="BRCA_SNP.xlsx",
+        fake_pos_filename="",
         qc_sheet_name="Summary",
         cnv_sheet_name="",
         hd_sheet_name="",
@@ -398,7 +400,7 @@ PRODUCTS: list[ProductConfig] = [
         review_tag_keywords=["Polymer", "STR"],
         # Discard 捞回
         significance_rescue_values=[4, 5],
-        freq_rescue_min=0.0015,
+        freq_rescue_min=0.005,
         rescue_tag_keywords=[],
         discard_tag_exclude=["Bad", "Polymorphism", "OutOfReg"],
         rescue_genes=[],

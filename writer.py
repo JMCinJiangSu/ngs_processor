@@ -2,9 +2,6 @@
 Excel 报告写出模块
 所有 write_* 函数通过参数接收数据和配置，不引用全局状态。
 """
-
-from http import server
-
 import pandas as pd
 import openpyxl
 from openpyxl.styles import PatternFill, Font, Alignment, Border, Side
@@ -35,21 +32,25 @@ THIN_BORDER = Border(
 CENTER = Alignment(horizontal="center", vertical="center")
 LEFT   = Alignment(horizontal="left",   vertical="center")
 
-server_dict = {
-    "HW2B4N2": "server-2-1", # 上海肺科
-    "1G27M74": "server-5-142", # 上海十院
-    "JW1DWF3": "server-4-84" # 华东医院
-}
+
 # =============================================
 # 样本bam文件路径
-def get_bam_path(ngs_path: str, summary_df: pd.DataFrame, cfg: ProductConfig) -> str:
+def get_bam_path(ngs_path: str, summary_df: pd.DataFrame, cfg: ProductConfig) -> list[str]:
     """
     根据服务器、批次、样本、文库、lane信息生成bam文件路径。
     """
     # 解析服务器和批次信息
-    batch = os.path.basename(ngs_path)[:-5]
+    required_cols = {"Sample", "Library", "FlowCell_Lane"}
+    if summary_df is None or summary_df.empty or not required_cols.issubset(summary_df.columns):
+        return []
+    
+    batch = os.path.splitext(os.path.basename(ngs_path))[0]
     df = summary_df.copy()
-    df["sample_id_full"] = df["Sample"] + "_" + df["Library"] + "_" + df["FlowCell_Lane"]
+    df["sample_id_full"] = (
+        df["Sample"].astype(str)
+        + "_" + df["Library"].astype(str)
+        + "_" + df["FlowCell_Lane"].astype(str)
+    )
 
     server_name = ""
     for k, v in cfg.server_dict.items():
@@ -111,9 +112,13 @@ def _bytes_to_human(val) -> str:
 # QC_Report（支持单/双阈值）
 # ─────────────────────────────────────────────
 def write_qc_report(wb, qc_df: pd.DataFrame, fail_dict: dict,
-                    risk_dict: dict, cfg: ProductConfig):
+                    risk_dict: dict, cfg: ProductConfig,
+                    ngs_path: str, summary_df: pd.DataFrame):
     ws = wb.create_sheet("QC_Report")
     headers = list(qc_df.columns)
+    if "bam_path" not in headers:
+        headers.append("bam_path")
+    bam_path_list = get_bam_path(ngs_path, summary_df, cfg) if ngs_path and summary_df is not None else []
     ncols   = len(headers)
     col_idx = {h: i + 1 for i, h in enumerate(headers)}
     cleandata_col = col_idx.get("CleanData")
@@ -130,8 +135,11 @@ def write_qc_report(wb, qc_df: pd.DataFrame, fail_dict: dict,
             row_fill = YELLOW_FILL
         else:
             row_fill = None
+        
+        bam_path = bam_path_list[r_idx - 2] if r_idx - 2 < len(bam_path_list) else ""
 
         row_vals = [
+            bam_path if c == "bam_path" else
             _bytes_to_human(row.get(c, "")) if c == "CleanData" or c == "cleanData" else row.get(c, "")
             for c in headers
         ]
