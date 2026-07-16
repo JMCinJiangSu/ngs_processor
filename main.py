@@ -4,6 +4,7 @@ NGS 下机数据自动化处理工具 — 入口
 """
 
 import os
+import shutil
 import sys
 import glob
 import time
@@ -17,13 +18,14 @@ from filters import (
     check_qc, to_num,
     process_snvindel, flag_hd_pass, flag_cnv, process_germnonic,
     process_hot_somatic, process_somatic, process_discard_rescue,
+    process_snp
 )
 from writer import (
     write_qc_report, write_qc_failitem,
     write_snvindel_review,
     write_hot_somatic_review, write_somatic_review, write_discard_review,
     write_cnv, write_amplicon_pivot, write_passthrough, write_hd_pass,
-    write_germnoic_review,
+    write_germnoic_review, write_variation_review
 )
 
 warnings.filterwarnings("ignore")
@@ -73,6 +75,7 @@ def process_file(ngs_path: str, fake_pos_df: pd.DataFrame | None, cfg: ProductCo
     hd_df       = read_sheet(cfg.hd_sheet_name)  if cfg.hd_sheet_name else pd.DataFrame()
     amplicon_df = read_sheet("AmpliconStat")  if cfg.has_amplicon else pd.DataFrame()
     passthrough_data = {s: read_sheet(s) for s in cfg.passthrough_sheets}
+    variation_df = read_sheet("Variation") if cfg.name == "BRCA V1" else pd.DataFrame()
 
     if cfg.has_snvindel:
         snv_df     = read_sheet("SNVIndel")
@@ -112,8 +115,8 @@ def process_file(ngs_path: str, fake_pos_df: pd.DataFrame | None, cfg: ProductCo
         else:
             snv_df = process_snvindel(snv_df, discard_df, fake_pos_df, cfg)
             rescued_df = process_discard_rescue(discard_df, cfg)
-            print(f"  SNVIndel 过滤后行数: {len(snv_df)}"
-                  f"  Discard二次筛选行数: {len(rescued_df)}")
+            #print(f"  SNVIndel 过滤后行数: {len(snv_df)}"
+            #      f"  Discard二次筛选行数: {len(rescued_df)}")
     
     if cfg.has_snvindel_split:
         if not hot_df.empty:
@@ -124,21 +127,39 @@ def process_file(ngs_path: str, fake_pos_df: pd.DataFrame | None, cfg: ProductCo
             #print(f"  Somatic 过滤后行数: {len(somatic_df)}")
         rescued_df = process_discard_rescue(discard_df, cfg)
         germnoic_df = process_germnonic(germnoic_df, cfg)
-        print(f"  Discard 二次筛选行数: {len(rescued_df)}"
-              f"  GermNonIC筛选行数： {len(germnoic_df)}"
-              )
+        #print(f"  Discard 二次筛选行数: {len(rescued_df)}"
+        #      f"  GermNonIC筛选行数： {len(germnoic_df)}"
+        #      )
+    
+    #BRCA V1 SNP位点标记
+    if cfg.name == "BRCA V1":
+        if not variation_df.empty:
+            variation_df = process_snp(variation_df, discard_df, fake_pos_df, cfg)
+            # IsFakePositive全部是否 不用写出excel
+            mask = variation_df["IsFakePositive"] == "是"
+            if mask.any():
+                print(f"\n{'='*60}")
+                print(os.path.basename(ngs_path).split("_")[0], variation_df.loc[mask, "Chr:Start-End"].to_string(index=False))
+            else:
+                variation_df = pd.DataFrame()
+            
 
     # ── 写出报告 ──────────────────────────────────────────────
     t_write = time.time()
     base    = os.path.splitext(os.path.basename(ngs_path))[0]
-    out_path = os.path.join(os.path.dirname(os.path.dirname(ngs_path)), "result", f"{base}_Report.xlsx")
+    if cfg.name == "BRCA V1":
+        out_path = os.path.join(os.path.dirname(os.path.dirname(ngs_path)), "result", f"{base}.xlsx")
+    else:
+        out_path = os.path.join(os.path.dirname(os.path.dirname(ngs_path)), "result", f"{base}_Report.xlsx")
 
     out_wb = openpyxl.Workbook()
     out_wb.remove(out_wb.active)
 
     if not qc_df.empty:
         write_qc_report(out_wb, qc_df, fail_dict, risk_dict, cfg, ngs_path, summary_df)
-    write_qc_failitem(out_wb, fail_dict, risk_dict)
+    
+    if cfg.name != "BRCA V1":
+        write_qc_failitem(out_wb, fail_dict, risk_dict)
 
     if cfg.has_snvindel and not snv_df.empty:
         write_snvindel_review(out_wb, snv_df, cfg)
@@ -168,9 +189,15 @@ def process_file(ngs_path: str, fake_pos_df: pd.DataFrame | None, cfg: ProductCo
     if cfg.has_amplicon:
         write_amplicon_pivot(out_wb, amplicon_df)
 
-    out_wb.save(out_path)
-    print(f"  写出耗时: {time.time() - t_write:.1f}s")
-    print(f"  ✔ 报告已生成: {os.path.basename(out_path)}  （总耗时 {time.time()-t0:.1f}s）")
+    if cfg.name == "BRCA V1":
+        write_variation_review(out_wb, variation_df, cfg)
+
+    print(variation_df)
+    if not variation_df.empty:
+        out_wb.save(out_path)
+    #out_wb.save(out_path)
+        #print(f"  写出耗时: {time.time() - t_write:.1f}s")
+        print(f"  ✔ 报告已生成: {os.path.basename(out_path)}  （总耗时 {time.time()-t0:.1f}s）")
 '''
     if fail_dict or risk_dict:
         print("\n  【质控提示】")
@@ -181,7 +208,23 @@ def process_file(ngs_path: str, fake_pos_df: pd.DataFrame | None, cfg: ProductCo
                 print(f"    [风险]   {sample} {', '.join(risks)}")
 '''
 
+def move_and_clean(work_dir):
+    for dirpath, _, filenames in os.walk(os.path.join(work_dir, "excel")):
+        if dirpath == os.path.join(work_dir, "excel"):
+            continue
 
+        for fname in filenames:
+            if fname.endswith("_raw.xlsx"):
+                src = os.path.join(dirpath, fname)
+                dst = os.path.join(work_dir, "excel", fname)
+                shutil.move(src, dst)
+                #print(f"已移动 {src} -> {dst}")
+
+    for entry in os.listdir(os.path.join(work_dir, "excel")):
+        path = os.path.join(work_dir, "excel", entry)
+        if os.path.isdir(path):
+            shutil.rmtree(path)
+            #print(f"已删除目录 {path}") 
 # ─────────────────────────────────────────────
 # 入口
 # ─────────────────────────────────────────────
@@ -189,7 +232,9 @@ def main():
     work_dir = os.path.dirname(sys.executable) if getattr(sys, "frozen", False) else os.getcwd()
     print("NGS 下机数据自动化处理工具")
     print(f"工作目录: {work_dir}")
-    print(f"已记录产品: {[p.name for p in PRODUCTS]}")
+    #print(f"已记录产品: {[p.name for p in PRODUCTS]}")
+
+    move_and_clean(work_dir)
 
     # 查找所有匹配的下机数据文件
     all_xlsx = glob.glob(os.path.join(work_dir, "excel", "*.xlsx"), recursive=True)
@@ -239,10 +284,12 @@ def main():
             file_times.append((os.path.basename(path), time.time() - ft0))
 
     print("\n" + "=" * 60)
+    '''
     if len(file_times) > 1:
         print("各文件耗时：")
         for fname, t in file_times:
             print(f"  {fname}: {t:.1f}s")
+    '''
     print(f"全部处理完成！总耗时 {time.time()-total_t0:.1f}s")
     input("按回车键退出...")
 

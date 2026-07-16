@@ -451,6 +451,32 @@ PRODUCTS: list[ProductConfig] = [
         has_snvindel_split=False,
         has_amplicon=False,
     ),
+    # BRCA V1
+    ProductConfig(
+        name="BRCA V1",
+        file_keyword="_raw",
+        fake_pos_filename="BRCA_SNP.xlsx",
+        qc_sheet_name="Summary",
+        cnv_sheet_name="",
+        hd_sheet_name="",
+        qc_rules={},
+        qc_report_cols=[],
+        snv_review_cols=["Gene", "Tags", "Chr:Start-End", "Ref", "Var", "Context", "Depth", "Frequency", "Ploidy",
+                         "Type", "CDSChange", "dbID", "Significance", "Source", "Reference", "Amplicon"],
+        discard_review_cols=[],
+        tag_filters=[],
+        low_altdepth_threshold=30,
+        # Discard 捞回
+        significance_rescue_values=[4, 5],
+        freq_rescue_min=0.015,
+        rescue_tag_keywords=[],
+        discard_tag_exclude=[],
+        rescue_genes=[],
+        passthrough_sheets=["Summary", "AmpliconStat"],
+        has_snvindel=False,
+        has_snvindel_split=False,
+        has_amplicon=False,
+    ),
 ]
 
 def detect_product(filename: str) -> ProductConfig | None:

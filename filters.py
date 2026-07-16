@@ -22,7 +22,10 @@ def normalize_cds(raw: str) -> str:
 
 def cds_key(df: pd.DataFrame) -> pd.Series:
     """所有统计的统一识别键：normalize_cds(CDSChange)。"""
-    return df["CDSChange"].astype(str).map(normalize_cds)
+    if "Chr:Start-End" in df.columns:
+        return df["Chr:Start-End"].astype(str).map(normalize_cds)
+    elif "CDSChange"  in df.columns:
+        return df["CDSChange"].astype(str).map(normalize_cds)
 
 
 # ══════════════════════════════════════════════════════════════
@@ -124,6 +127,7 @@ def _add_stats(snv_df: pd.DataFrame, discard_df: pd.DataFrame,
     fake_keys: set[str] = set()
     if fake_pos_df is not None and not fake_pos_df.empty:
         fake_keys = set(cds_key(fake_pos_df))
+    
     snv_df["IsFakePositive"] = snv_df["_key"].map(lambda k: "是" if k in fake_keys else "否")
 
     threshold = cfg.low_altdepth_threshold
@@ -420,3 +424,12 @@ def flag_review(snv_df: pd.DataFrame, cfg: ProductConfig) -> pd.DataFrame:
 
     snv_df["Review_Flag"] = (branch_a | branch_b).map(lambda x: "Yes" if x else "")
     return snv_df
+
+def process_snp(
+    snv_df: pd.DataFrame,
+    discard_df: pd.DataFrame,
+    fake_pos_df: pd.DataFrame | None,
+    cfg: ProductConfig,
+) -> pd.DataFrame:
+    """BRCA V1 SNP位点标记，复旦中山检验科"""
+    return _add_stats(snv_df, discard_df, fake_pos_df, cfg)

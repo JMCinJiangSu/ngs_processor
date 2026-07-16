@@ -318,6 +318,31 @@ def _write_snv_sheet(wb, sheet_name: str, df: pd.DataFrame,
 def write_snvindel_review(wb, snv_df: pd.DataFrame, cfg: ProductConfig):
     _write_snv_sheet(wb, "SNVIndel_Review", snv_df, cfg.snv_review_cols, cfg)
 
+def write_variation_review(wb, df: pd.DataFrame, cfg: ProductConfig):
+    if df is None or df.empty:
+        return
+    ws = wb.create_sheet("Variation")
+    common_extra = ["IsFakePositive"]
+    avail_review = [c for c in cfg.snv_review_cols if c in df.columns]
+    all_cols = avail_review + common_extra
+    out_df = df[all_cols].copy()
+    ncols = len(all_cols)
+    col_idx = {h: i + 1 for i, h in enumerate(all_cols)}
+
+    ws.append(all_cols)
+    _style_header(ws, ncols)
+    for r_idx, (_, row) in enumerate(df.iterrows(), start=2):
+        ws.append([row.get(c, "") for c in all_cols])
+        fake_pos  = str(row.get("IsFakePositive", ""))
+        if fake_pos == "是":
+            fill = YELLOW_FILL
+        else:
+            fill = None
+        _style_row(ws, r_idx, ncols, fill=fill)
+    
+    ws.freeze_panes = ws["A2"]
+    _auto_col_width(ws)
+    ws.row_dimensions[1].height = 20
 
 # ─────────────────────────────────────────────
 # 三表模式（NewProduct）
