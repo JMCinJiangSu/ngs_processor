@@ -192,8 +192,8 @@ def process_file(ngs_path: str, fake_pos_df: pd.DataFrame | None, cfg: ProductCo
     if cfg.name == "BRCA V1":
         write_variation_review(out_wb, variation_df, cfg)
 
-    print(variation_df)
-    if not variation_df.empty:
+    should_save = cfg.name != "BRCA V1" or not variation_df.empty
+    if should_save:
         out_wb.save(out_path)
     #out_wb.save(out_path)
         #print(f"  写出耗时: {time.time() - t_write:.1f}s")
