@@ -20,7 +20,8 @@ server_dict = {
     "HW2B4N2": "server-2-1", # 上海肺科
     "1G27M74": "server-5-142", # 上海十院
     "JW1DWF3": "server-4-84", # 华东医院
-    "FGN7X34": "server-5-121" # 复旦中山
+    "FGN7X34": "server-5-121", # 复旦中山
+    "G5KL6S3": "server-6-3", # 青岛附属医院
 }
 
 @dataclass
@@ -399,12 +400,12 @@ PRODUCTS: list[ProductConfig] = [
         review_freq_threshold_polymer_str=0.35,
         review_tag_keywords=["Polymer", "STR"],
         # Discard 捞回
-        significance_rescue_values=[4, 5],
+        significance_rescue_values=["4", "5"],
         freq_rescue_min=0.005,
         rescue_tag_keywords=[],
         discard_tag_exclude=["Bad", "Polymorphism", "OutOfReg"],
         rescue_genes=[],
-        passthrough_sheets=["SNVIndelDiscard"],
+        passthrough_sheets=[],
         has_snvindel=True,
         has_snvindel_split=False,
         has_amplicon=False,
@@ -441,12 +442,12 @@ PRODUCTS: list[ProductConfig] = [
         tag_filters=["Black_list", "Polymorphism"],
         low_altdepth_threshold=30,
         # Discard 捞回
-        significance_rescue_values=[4, 5],
+        significance_rescue_values=["4", "5"],
         freq_rescue_min=0.015,
         rescue_tag_keywords=[],
         discard_tag_exclude=["Bad", "Polymorphism", "OutOfReg"],
         rescue_genes=[],
-        passthrough_sheets=["HD"],
+        passthrough_sheets=[],
         has_snvindel=True,
         has_snvindel_split=False,
         has_amplicon=False,
