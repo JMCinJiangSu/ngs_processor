@@ -18,6 +18,7 @@ from dataclasses import dataclass, field
 # 服务器映射表（用于生成bam文件路径）
 server_dict = {
     "HW2B4N2": "server-2-1", # 上海肺科
+    "8DTS894": "server-6-9", # 上海肺科
     "1G27M74": "server-5-142", # 上海十院
     "JW1DWF3": "server-4-84", # 华东医院
     "FGN7X34": "server-5-121", # 复旦中山
@@ -110,6 +111,7 @@ PRODUCTS: list[ProductConfig] = [
             "Depth_CDS":         (">=", 400.0),
             "RNA-Control":       (">=", 10.0),
             "Coverage(50x)_SNP": (">=", 0.90),
+            "MSI_Ratio":          ("risk_between", 0.24, 0.12)
         },
         qc_report_cols=[
             "Sample", "CleanData", "CleanQ30", "Depth_CDS",
@@ -134,8 +136,8 @@ PRODUCTS: list[ProductConfig] = [
         tag_filters=["Black_list", "Polymorphism"],
         low_altdepth_threshold=30,
         # Discard 捞回
-        significance_rescue_values=[4, 5],
-        freq_rescue_min=0.0001,
+        significance_rescue_values=["4", "5"],
+        freq_rescue_min=0.005,
         rescue_tag_keywords=["HotSpot"],
         rescue_genes=[
             "ALK", "BRAF", "EGFR", "ERBB2", "ROS1",
@@ -157,8 +159,9 @@ PRODUCTS: list[ProductConfig] = [
         hd_sheet_name="",
         qc_rules={
             "CleanQ30":          (">=", 0.75),
-            "Depth":         (">=", 400.0),
+            "Depth":             (">=", 400.0),
             "RNA-Control":       (">=", 20.0),
+            "MSI_Ratio":          ("risk_between", 0.24, 0.12)
         },
         qc_report_cols=[
             "Sample", "CleanData", "CleanQ30", "Depth", "RNA-Control",
@@ -176,7 +179,7 @@ PRODUCTS: list[ProductConfig] = [
         tag_filters=["Black_list", "Polymorphism"],
         low_altdepth_threshold=30,
         passthrough_sheets=["NEWFusion", "Fusion"],
-        significance_rescue_values=[4, 5],
+        significance_rescue_values=["4", "5"],
         freq_rescue_min=0.0001,
         rescue_tag_keywords=["HotSpot"],
         has_snvindel=True,
