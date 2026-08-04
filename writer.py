@@ -377,8 +377,20 @@ def write_discard_review(wb, df: pd.DataFrame, cfg: ProductConfig):
     _auto_col_width(ws)
 
 # ─────────────────────────────────────────────
-# CNV（标记 Confidence=Low）
+# CNV（标记 nCall 未全检出 / Confidence=Low / CNV_Flag）
 # ─────────────────────────────────────────────
+def _is_partial_ncall(value) -> bool:
+    """判断 nCall 是否为 "a of b" 且 a < b。"""
+    parts = str(value).strip().split(" of ")
+    if len(parts) != 2:
+        return False
+    try:
+        called, total = (int(part.strip()) for part in parts)
+    except ValueError:
+        return False
+    return called < total
+
+
 def write_cnv(wb, cnv_df: pd.DataFrame):
     if cnv_df is None or cnv_df.empty:
         return
@@ -389,9 +401,26 @@ def write_cnv(wb, cnv_df: pd.DataFrame):
     ws.append(headers); _style_header(ws, ncols)
     for r_idx, (_, row) in enumerate(cnv_df.iterrows(), start=2):
         ws.append([row.get(c, "") for c in headers])
-        is_low = str(row.get("Confidence", "")).strip().lower() == "low" or str(row.get("CNV_Flag", "")).strip().lower() == "yes"
-        _style_row(ws, r_idx, ncols, fill=ORANGE_FILL if is_low else None)
-    # HANDLE 
+        should_highlight = (
+            ("nCall" in col_idx and _is_partial_ncall(row.get("nCall", "")))
+            or str(row.get("Confidence", "")).strip().lower() == "low"
+            or str(row.get("CNV_Flag", "")).strip().lower() == "yes"
+        )
+        _style_row(ws, r_idx, ncols, fill=ORANGE_FILL if should_highlight else None)
+
+    # 条件格式：nCall = "a of b" 且 a < b → 橙色（Excel 中动态生效）
+    if "nCall" in col_idx:
+        cl = get_column_letter(col_idx["nCall"])
+        partial_ncall_formula = (
+            f'IFERROR(VALUE(LEFT(${cl}2,FIND(" of ",${cl}2)-1))'
+            f'<VALUE(MID(${cl}2,FIND(" of ",${cl}2)+4,99)),FALSE)'
+        )
+        ws.conditional_formatting.add(
+            f"A2:{get_column_letter(ncols)}{len(cnv_df) + 1}",
+            FormulaRule(formula=[partial_ncall_formula], fill=ORANGE_FILL),
+        )
+
+    # 条件格式：Confidence = "Low" → 橙色（Excel 中动态生效）
     if "Confidence" in col_idx:
         cl = get_column_letter(col_idx["Confidence"])
         ws.conditional_formatting.add(
