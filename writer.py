@@ -395,7 +395,8 @@ def write_cnv(wb, cnv_df: pd.DataFrame):
     if cnv_df is None or cnv_df.empty:
         return
     ws      = wb.create_sheet("CNV")
-    headers = list(cnv_df.columns)
+    hidden_cols = {"Library", "FlowCell_Lane"}
+    headers = [c for c in cnv_df.columns if c not in hidden_cols]
     ncols   = len(headers)
     col_idx = {h: i + 1 for i, h in enumerate(headers)}
     ws.append(headers); _style_header(ws, ncols)
@@ -445,7 +446,8 @@ def write_hd_pass(wb, hd_df: pd.DataFrame):
     if hd_df is None or hd_df.empty:
         return
     ws      = wb.create_sheet("HD_pass")
-    headers = list(hd_df.columns)
+    hidden_cols = {"Library", "FlowCell_Lane", "A", "B"}
+    headers = [c for c in hd_df.columns if c not in hidden_cols]
     ncols   = len(headers)
     col_idx = {h: i + 1 for i, h in enumerate(headers)}
 
