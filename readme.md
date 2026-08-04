@@ -149,7 +149,7 @@ BRCA V1 仅在发现假阳性 SNP 位点时保存输出文件。
 | `Somatic_Review` | 三表模式下 Somatic 复核表 |
 | `GermNonIC_Review` | 三表模式下 GermNonIC 筛选复核表 |
 | `Discard_Review` | SNVIndelDiscard 二次筛选结果 |
-| `CNV` | CNV 结果，并对低置信/需复核 CNV 进行橙色标记 |
+| `CNV` | CNV 结果，并对未全检出/低置信/需复核 CNV 进行橙色标记 |
 | `HD_pass` | HD 结果，并对需复核行进行橙色标记 |
 | `AmpliconStat` | 按 Amplicon 和 Sample 生成 RoT 透视表 |
 | 透传 Sheet | 配置中指定的原始 Sheet 直接写入结果文件 |
@@ -202,7 +202,8 @@ QC 阈值在 `config.py` 的 `PRODUCTS` 中按产品配置。支持两类规则�
 
 CNV 输出中满足以下任一条件的行会被橙色标记：
 
-- `Confidence` 为 `Low`。
+- 存在 `nCall` 列，且内容为 `a of b`（`a`、`b` 均为数字）时，`a < b`。
+- 在余下行中，`Confidence` 为 `Low`。
 - 程序生成的 `CNV_Flag` 为 `Yes`。
 
 其中 `CNV_Flag` 的当前逻辑为：`CopyNum >= 10` 且 `Auto == "F"`。
