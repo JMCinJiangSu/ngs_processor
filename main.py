@@ -69,6 +69,26 @@ def process_file(ngs_path: str, fake_pos_df: pd.DataFrame | None, cfg: ProductCo
         except Exception:
             return pd.DataFrame()
 
+    def read_mrna_imbalance_check() -> pd.DataFrame:
+        """读取同名 .check.xlsx 文件中的 mRNA-imbalance，并仅保留 Tags 为 T 的行。"""
+        base, ext = os.path.splitext(ngs_path)
+        check_path = f"{base}.check{ext}"
+        if not os.path.exists(check_path):
+            return pd.DataFrame()
+        try:
+            df = pd.read_excel(check_path, sheet_name="mRNA-imbalance")
+        except Exception as e:
+            print(f"  ⚠ check文件 mRNA-imbalance 读取失败: {e}")
+            return pd.DataFrame()
+        if "Tags" not in df.columns:
+            print("  ⚠ check文件 mRNA-imbalance 缺少 Tags 列，跳过")
+            return pd.DataFrame()
+        filtered = df[df["Tags"].astype(str).str.strip().eq("T")].copy()
+        print(
+            f"  已读取check文件 mRNA-imbalance: {len(filtered)}/{len(df)} 行 Tags=T"
+        )
+        return filtered
+
     t_read = time.time()
     summary_df  = read_sheet(cfg.qc_sheet_name) if cfg.qc_sheet_name else pd.DataFrame()
     cnv_df      = read_sheet(cfg.cnv_sheet_name) if cfg.cnv_sheet_name else pd.DataFrame()
@@ -76,6 +96,7 @@ def process_file(ngs_path: str, fake_pos_df: pd.DataFrame | None, cfg: ProductCo
     amplicon_df = read_sheet("AmpliconStat")  if cfg.has_amplicon else pd.DataFrame()
     passthrough_data = {s: read_sheet(s) for s in cfg.passthrough_sheets}
     variation_df = read_sheet("Variation") if cfg.name == "BRCA V1" else pd.DataFrame()
+    mrna_imbalance_df = read_mrna_imbalance_check()
 
     if cfg.has_snvindel:
         snv_df     = read_sheet("SNVIndel")
@@ -186,6 +207,9 @@ def process_file(ngs_path: str, fake_pos_df: pd.DataFrame | None, cfg: ProductCo
             write_passthrough(out_wb, sheet_name, df)
             #print(f"  已输出 Sheet: {sheet_name}")
 
+    if not mrna_imbalance_df.empty:
+        write_passthrough(out_wb, "mRNA-imbalance", mrna_imbalance_df)
+
     if cfg.has_amplicon:
         write_amplicon_pivot(out_wb, amplicon_df)
 
@@ -236,9 +260,24 @@ def main():
 
     move_and_clean(work_dir)
 
-    # 查找所有匹配的下机数据文件
-    all_xlsx = glob.glob(os.path.join(work_dir, "excel", "*.xlsx"), recursive=True)
-    all_xlsx = [f for f in all_xlsx if "_Report" not in os.path.basename(f)]
+    # 查找所有匹配的下机数据文件：
+    # 1. 下机数据都存放在 excel 文件夹中
+    # 2. 结果文件保存在 result 文件夹，文件名包含 _Report
+    # 3. 待处理文件需排除 result 文件夹中已存在对应 _Report 的 excel 表格
+    excel_dir = os.path.join(work_dir, "excel")
+    result_dir = os.path.join(work_dir, "result")
+    result_xlsx = glob.glob(os.path.join(result_dir, "*.xlsx"), recursive=False)
+    processed_bases = {
+        os.path.basename(path).split("_Report", 1)[0]
+        for path in result_xlsx
+        if "_Report" in os.path.basename(path)
+    }
+    all_xlsx = glob.glob(os.path.join(excel_dir, "*.xlsx"), recursive=False)
+    all_xlsx = [
+        f for f in all_xlsx
+        if not os.path.splitext(os.path.basename(f))[0].endswith(".check")
+        and os.path.splitext(os.path.basename(f))[0] not in processed_bases
+    ]
 
     # 按产品分组
     product_files: dict[str, list[str]] = {}   # product.name -> [paths]
