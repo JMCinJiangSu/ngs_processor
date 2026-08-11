@@ -525,7 +525,8 @@ def write_passthrough(wb, sheet_name: str, df: pd.DataFrame):
     if df is None or df.empty:
         return
     ws      = wb.create_sheet(sheet_name)
-    headers = list(df.columns)
+    hidden_cols = {"Library", "FlowCell_Lane"}
+    headers = [c for c in df.columns if c not in hidden_cols]
     ncols   = len(headers)
     ws.append(headers); _style_header(ws, ncols)
     for r_idx, (_, row) in enumerate(df.iterrows(), start=2):
